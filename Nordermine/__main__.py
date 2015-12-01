@@ -3,6 +3,7 @@
 Created on 2015/11/30
 
 @author: osakikeishiro
+@version: 0.8
 
 required Python3.5
 '''
@@ -34,6 +35,9 @@ def logsumexp(x, y, flg):
         return vmax + math.log(math.exp(vmin - vmax) + 1.0)
 
 class Nordermine:
+    """
+    Nordermineのモデル全体を格納するクラス
+    """
     def __init__(self, records, k, useColumns,header):
         self.records = records
         self.M = len(useColumns)
