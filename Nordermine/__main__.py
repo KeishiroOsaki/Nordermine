@@ -213,6 +213,10 @@ if __name__ == '__main__':
         useColumns.append(int(args[i]) - 1)
     print(useColumns)
     
+    if len(useColumns) < 3:
+        sys.stderr.write("分析に用いる項目の数は3以上にしてください")
+        sys.exit()
+    
     print("データセット読み込み開始")
     rows = []
     f = open(inputCSVPath, 'r', encoding='utf-8')
