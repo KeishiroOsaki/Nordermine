@@ -156,7 +156,7 @@ class Nordermine:
         
 
     def inference(self,flg):
-        maxStep = 5
+        maxStep = 20
         
         for i in range(maxStep):
             print("iter: " + str(i+1))
@@ -211,7 +211,7 @@ if __name__ == '__main__':
     useColumns = []
     for i in range(4, len(args)):
         useColumns.append(int(args[i]) - 1)
-    print(useColumns)
+    #print(useColumns)
     
     if len(useColumns) < 3:
         sys.stderr.write("分析に用いる項目の数は3以上にしてください")
@@ -227,13 +227,13 @@ if __name__ == '__main__':
         for i in range(0, len(useColumns)):
             line.append(row[useColumns[i]])
         rows.append(line)
-    print(header)
-    print(rows[0])
+    #print(header)
+    #print(rows[0])
     useHeader = []
     for i in range(len(useColumns)):
-        print(header[useColumns[i]] , end = " ")
+        #print(header[useColumns[i]] , end = " ")
         useHeader.append(header[useColumns[i]])
-    print("")
+    print(useHeader)
     print("読み込み完了 : " + str(len(rows)) + "件")
     
     model = Nordermine(rows, k, useColumns,useHeader)
