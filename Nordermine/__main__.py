@@ -15,6 +15,7 @@ from scipy import special
 import math
 import random
 import time
+from test._test_multiprocessing import PRELOAD
 
 def logsumexp(x, y, flg):
     if flg != 0:
@@ -38,7 +39,7 @@ class Nordermine:
     """
     Nordermineのモデル全体を格納するクラス
     """
-    def __init__(self, records, k, useColumns,header):
+    def __init__(self, records, k, useColumns, header):
         self.records = records
         self.M = len(useColumns)
         self.z = [-1 for i in range(0, len(records))]
@@ -54,7 +55,7 @@ class Nordermine:
             for j in range(0, len(rows)):
                 tmplist.append(rows[j][i])
             self.dValues.append(sorted(set(tmplist)))
-            self.numofDvalues.append(len(self.dValues[i]))
+            self.numofDvalues.append(len(self.dValues[i]))  # 重複なし値の個数
         
         # 値からインデックスを求めるための辞書を生成
         self.dValuesDict = []
@@ -63,8 +64,9 @@ class Nordermine:
             for j in range(len(self.dValues[i])):
                 tmpDict[self.dValues[i][j]] = j
             self.dValuesDict.append(tmpDict)
+            
         
-        #レコードをインデックス化
+        # レコードをインデックス化
         self.indexRecords = []
         for i in range(len(self.records)):
             tmp = []
@@ -116,13 +118,13 @@ class Nordermine:
             if self.hyperParameters[g] < eps:
                 self.hyperParameters[g] = eps
 
-    def sampling(self,index):
+    def sampling(self, index):
         posts = []
         
         rowIdx = self.indexRecords[index]
         
         topic = self.z[index]
-        if topic != -1: #2回目以降のiterの場合に実行
+        if topic != -1:  # 2回目以降のiterの場合に実行
             self.Nk[topic] -= 1
             for i in range(self.M):
                 self.Nxk[i][rowIdx[i]][topic] -= 1
@@ -130,14 +132,14 @@ class Nordermine:
         for l in range(self.k):
             tmp = 1.0
             
-            nume=self.Nxk[0][rowIdx[0]][l] + self.hyperParameters[0]
+            nume = self.Nxk[0][rowIdx[0]][l] + self.hyperParameters[0]
             deno = self.Nu[rowIdx[0]] + self.hyperParameters[0] * self.k
-            tmp *= nume/deno
+            tmp *= nume / deno
             
-            for m in range(1,self.M):
+            for m in range(1, self.M):
                 nume = self.Nxk[m][rowIdx[m]][l] + self.hyperParameters[m]
-                deno = self.Nk[l] + self.hyperParameters[m] * len(self.dValues[m])
-                tmp *= nume/deno
+                deno = self.Nk[l] + self.hyperParameters[m] * self.numofDvalues[m]
+                tmp *= nume / deno
             posts.append(tmp)
             
         Z = sum(posts)
@@ -154,46 +156,93 @@ class Nordermine:
         for m in range(self.M):
             self.Nxk[m][rowIdx[m]][nextz] += 1
         
+    def likelihood(self):
+        L = len(self.dValues[0]) * math.lgamma(self.hyperParameters[0]) - self.numofDvalues[0] * self.k * math.lgamma(self.hyperParameters[0])
+        L += self.k * math.lgamma(self.hyperParameters[1] * self.numofDvalues[1]) - self.k * self.numofDvalues[1] * math.lgamma(self.hyperParameters[1])
+        for i in range(self.numofDvalues[0]):
+            L -= math.lgamma(self.Nu[i] + self.hyperParameters[0] * self.k)
+            for j in range(self.k):
+                #print(self.Nxk[0][i][j])
+                L += math.lgamma(self.Nxk[0][i][j]+self.hyperParameters[0])
+                
+        for i in range(self.k):
+            L -= math.lgamma(self.Nk[i] + self.hyperParameters[1] * self.numofDvalues[1])
+            for j in range(self.numofDvalues[1]):
+                L += math.lgamma(self.Nxk[1][j][i]+self.hyperParameters[1])
+                
+        return L
 
-    def inference(self,flg):
-        maxStep = 20
+    def inference(self, flg):
+        maxStep = 200
+        preL = self.likelihood()
+        diff = []
+        
+        preV = -float('inf')
         
         for i in range(maxStep):
-            print("iter: " + str(i+1))
+            print("iter: " + str(i + 1) + " / " + str(maxStep))
             for j in range(len(self.records)):
                 self.sampling(j)
-            print(self.Nk)
+            print("トピック割当：" + str(self.Nk))
             if flg == True:
                 self.updateParameter()
+                print("ハイパーパラメータ値：" + str(self.hyperParameters))
+                
+            L = self.likelihood()
+            if i == 0: startL = L
+            v = L - preL
+            diff.append(v)
+            print(str(L) + "\t" + str(v))
+
+            #if i > 5 and v > -preV and preV < 0:
+            #if i > 5 and (abs(startL)*0.5 + startL) < L:
+            if i > 5 and v/max(diff) < 0.025:
+                print("結果が安定したため終了します")
+                break
+            preL = L
+            preV = v
+                
     def calcParams(self):
         for m in range(len(self.ansModel)):
             for k in range(self.k):
-                for i in range(len(self.dValues[m])):
+                for i in range(self.numofDvalues[m]):
                     if m == 0:
-                        self.ansModel[m][i][k] = (self.Nxk[m][i][k] + self.hyperParameters[m])/(self.Nu[i]+self.hyperParameters[m]*self.k)
+                        self.ansModel[m][i][k] = (self.Nxk[m][i][k] + self.hyperParameters[m]) / (self.Nu[i] + self.hyperParameters[m] * self.k)
                     else:
-                        self.ansModel[m][i][k] = (self.Nxk[m][i][k] + self.hyperParameters[m])/(self.Nk[k]+self.hyperParameters[m]*len(self.dValues[m]))
+                        self.ansModel[m][i][k] = (self.Nxk[m][i][k] + self.hyperParameters[m]) / (self.Nk[k] + self.hyperParameters[m] * self.numofDvalues[m])
     
-    def writeParams(self,directory):
+    def writeParams(self, directory):
         for m in range(self.M):
             fileName = ""
             if m == 0:
                 fileName = directory + "O"
-            elif m == self.M-1:
+            elif m == self.M - 1:
                 fileName = directory + "C"
             else:
                 fileName = directory + "A" + str(m)
-            f = open(fileName, 'w',encoding = 'UTF-8')
-            writer = csv.writer(f, lineterminator='\n',delimiter=' ')
+            f = open(fileName, 'w', encoding='UTF-8')
+            writer = csv.writer(f, lineterminator='\n', delimiter=' ')
             writer.writerows(self.ansModel[m])
             f.close()
             
-            f = open(fileName + ".tsv", 'w',encoding = 'UTF-8')
-            writer = csv.writer(f, lineterminator='\n',delimiter='\t', quoting=csv.QUOTE_NONNUMERIC)
+            nxkFileName = ""
+            if m == 0:
+                nxkFileName = directory + "N" + "O" + "k.tsv"
+            elif m == self.M - 1:
+                nxkFileName = directory + "N" + "C" + "k.tsv"
+            else:
+                nxkFileName = directory + "N" + "A" + str(m) + "k.tsv"
+            f = open(nxkFileName, 'w', encoding='UTF-8')
+            writer = csv.writer(f, lineterminator='\n', delimiter='\t')
+            writer.writerows(self.Nxk[m])
+            f.close()
+            
+            f = open(fileName + ".tsv", 'w', encoding='UTF-8')
+            writer = csv.writer(f, lineterminator='\n', delimiter='\t', quoting=csv.QUOTE_NONNUMERIC)
             hd = []
             hd.append(self.header[m])
             for i in range(self.k):
-                hd.append("topic" + str(i +1))
+                hd.append("topic" + str(i + 1))
             writer.writerow(hd)
             for i in range(len(self.ansModel[m])):
                 r = []
@@ -211,7 +260,7 @@ if __name__ == '__main__':
     useColumns = []
     for i in range(4, len(args)):
         useColumns.append(int(args[i]) - 1)
-    #print(useColumns)
+    # print(useColumns)
     
     if len(useColumns) < 3:
         sys.stderr.write("分析に用いる項目の数は3以上にしてください")
@@ -227,16 +276,16 @@ if __name__ == '__main__':
         for i in range(0, len(useColumns)):
             line.append(row[useColumns[i]])
         rows.append(line)
-    #print(header)
-    #print(rows[0])
+    # print(header)
+    # print(rows[0])
     useHeader = []
     for i in range(len(useColumns)):
-        #print(header[useColumns[i]] , end = " ")
+        # print(header[useColumns[i]] , end = " ")
         useHeader.append(header[useColumns[i]])
     print(useHeader)
     print("読み込み完了 : " + str(len(rows)) + "件")
     
-    model = Nordermine(rows, k, useColumns,useHeader)
+    model = Nordermine(rows, k, useColumns, useHeader)
     
     print("サンプリング開始")
     start = time.time()
